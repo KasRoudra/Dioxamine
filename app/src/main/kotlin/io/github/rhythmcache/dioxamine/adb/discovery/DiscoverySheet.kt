@@ -2,9 +2,11 @@ package io.github.rhythmcache.dioxamine.adb.discovery
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -43,10 +45,24 @@ fun DiscoveryDialog(
     val context = LocalContext.current
     val discoveryVm = remember { AdbDiscoveryViewModel(context) }
     var step by remember { mutableStateOf<DiscoveryStep>(DiscoveryStep.DeviceList) }
+    val historyPrefs = remember { context.getSharedPreferences("device_address_history", android.content.Context.MODE_PRIVATE) }
+    var historyItems by remember {
+        val raw = historyPrefs.getString("saved_addresses", "") ?: ""
+        val list = if (raw.isNotBlank()) raw.split(";").filter { it.isNotBlank() } else emptyList()
+        mutableStateOf(list)
+    }
 
     DisposableEffect(Unit) {
         discoveryVm.startDiscovery()
         onDispose { discoveryVm.stopDiscovery() }
+    }
+
+    val saveAddressHistory = { address: String ->
+        val current = historyPrefs.getString("saved_addresses", "") ?: ""
+        val list = current.split(";").filter { it.isNotBlank() && it != address }.toMutableList()
+        list.add(0, address)
+        historyPrefs.edit().putString("saved_addresses", list.take(15).joinToString(";")).apply()
+        historyItems = list.take(15)
     }
 
     Dialog(
@@ -70,12 +86,15 @@ fun DiscoveryDialog(
             ) {
                 when (val s = step) {
                     is DiscoveryStep.DeviceList -> DeviceListStep(
+                        vm = vm,
                         discoveryVm = discoveryVm,
+                        historyItems = historyItems,
                         onDismiss = onDismiss,
                         onManualEntry = { step = DiscoveryStep.ManualChooseType },
                         onDeviceSelected = { device ->
                             when (device.type) {
                                 AdbServiceType.TCP -> {
+                                    saveAddressHistory("${device.host}:${device.port}")
                                     vm.connectTcpDirect(device.host, device.port)
                                     onDismiss()
                                 }
@@ -84,6 +103,7 @@ fun DiscoveryDialog(
                                     step = DiscoveryStep.ManualTlsConnect(device.host, device.port.toString(), serviceName = device.serviceName)
                                     vm.connectTls(device.host, device.port) { success, _ ->
                                         if (success) {
+                                            saveAddressHistory("tls:${device.host}:${device.port}")
                                             onDismiss()
                                         }
                                     }
@@ -103,6 +123,7 @@ fun DiscoveryDialog(
                         initial = s,
                         onBack = { step = DiscoveryStep.ManualChooseType },
                         onConnect = { ip, port ->
+                            saveAddressHistory("$ip:$port")
                             vm.connectTcpDirect(ip, port.toInt())
                             onDismiss()
                         }
@@ -120,7 +141,12 @@ fun DiscoveryDialog(
                         onGoToPair = { ip, port -> step = DiscoveryStep.ManualTlsPair(ip, port) },
                         onConnect = { ip, port, callback ->
                             vm.clearPairingError()
-                            vm.connectTls(ip, port.toInt(), callback)
+                            vm.connectTls(ip, port.toInt()) { success, err ->
+                                if (success) {
+                                    saveAddressHistory("tls:$ip:$port")
+                                }
+                                callback?.invoke(success, err)
+                            }
                         },
                         onDismissAfterConnected = onDismiss
                     )
@@ -151,7 +177,9 @@ fun DiscoverySheet(
 
 @Composable
 private fun DeviceListStep(
+    vm: AdbViewModel,
     discoveryVm: AdbDiscoveryViewModel,
+    historyItems: List<String>,
     onDismiss: () -> Unit,
     onManualEntry: () -> Unit,
     onDeviceSelected: (DiscoveredAdbDevice) -> Unit
@@ -177,6 +205,51 @@ private fun DeviceListStep(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+
+        // Wireless Address History for Fast Reconnection
+        if (historyItems.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Recent Addresses",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                for (item in historyItems) {
+                    val isTls = item.startsWith("tls:")
+                    val clean = if (isTls) item.removePrefix("tls:") else item
+                    val parts = clean.split(":")
+                    val host = parts.getOrNull(0) ?: ""
+                    val port = parts.getOrNull(1)?.toIntOrNull() ?: 5555
+                    AssistChip(
+                        onClick = {
+                            if (isTls) {
+                                vm.connectTls(host, port) { success, _ ->
+                                    if (success) onDismiss()
+                                }
+                            } else {
+                                vm.connectTcpDirect(host, port)
+                                onDismiss()
+                            }
+                        },
+                        label = {
+                            Text(if (isTls) "TLS $clean" else clean, style = MaterialTheme.typography.labelSmall)
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Filled.History, contentDescription = null, modifier = Modifier.size(14.dp))
+                        }
+                    )
+                }
+            }
+        }
+
         Spacer(Modifier.height(12.dp))
 
         val devices = discoveryVm.devices.values.toList()

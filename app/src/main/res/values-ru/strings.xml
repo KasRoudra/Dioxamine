@@ -768,7 +768,7 @@
     <string name="remote_media_controls">Управление медиа</string>
     <string name="remote_numeric_keypad">Цифровая клавиатура</string>
     <string name="touchpad_type">Тип</string>
-    <string name="adb_ip_placeholder">192.168.1.100 или 192.168.1.100:5555</string>
+    <string name="adb_ip_placeholder">Введите IP</string>
     <string name="cd_choose_save_location">Выбрать место сохранения</string>
     <string name="cd_attach_image">Прикрепить образ</string>
     <string name="touchpad_error_details">Детали: %1$s</string>

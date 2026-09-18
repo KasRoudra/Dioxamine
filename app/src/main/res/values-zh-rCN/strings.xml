@@ -766,7 +766,7 @@
     <string name="remote_media_controls">媒体控制</string>
     <string name="remote_numeric_keypad">数字键盘</string>
     <string name="touchpad_type">输入</string>
-    <string name="adb_ip_placeholder">192.168.1.100 或 192.168.1.100:5555</string>
+    <string name="adb_ip_placeholder">输入 IP</string>
     <string name="cd_choose_save_location">选择保存位置</string>
     <string name="cd_attach_image">附加镜像</string>
     <string name="touchpad_error_details">详情：%1$s</string>

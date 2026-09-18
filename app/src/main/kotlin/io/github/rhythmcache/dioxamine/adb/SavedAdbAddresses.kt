@@ -24,6 +24,14 @@ object SavedAdbAddresses {
         return raw.split(DELIMITER).filter { it.isNotBlank() }
     }
 
+    /** Returns unique saved IP addresses (stripped of port), most recently added/used first. */
+    fun getAllIps(context: Context): List<String> {
+        return getAll(context)
+            .map { it.substringBefore(":").trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+    }
+
     /** Adds an "ip:port" address, or moves it to the front if it's already saved. */
     fun add(context: Context, address: String) {
         val trimmed = address.trim()
@@ -35,10 +43,36 @@ object SavedAdbAddresses {
         prefs(context).edit().putString(KEY_ADDRESSES, current.joinToString(DELIMITER)).apply()
     }
 
+    /** Adds or promotes an IP address to the front of history. If an existing ip:port exists, moves it to the front. */
+    fun addIp(context: Context, ip: String) {
+        val trimmed = ip.trim()
+        if (trimmed.isEmpty() || !isValidIp(trimmed)) return
+        val current = getAll(context).toMutableList()
+        val existing = current.firstOrNull { it == trimmed || it.startsWith("$trimmed:") }
+        if (existing != null) {
+            current.remove(existing)
+            current.add(0, existing)
+        } else {
+            current.add(0, trimmed)
+        }
+        while (current.size > MAX_SAVED) current.removeAt(current.lastIndex)
+        prefs(context).edit().putString(KEY_ADDRESSES, current.joinToString(DELIMITER)).apply()
+    }
+
     /** Removes a single saved "ip:port" address. */
     fun remove(context: Context, address: String) {
         val current = getAll(context).toMutableList()
         if (current.remove(address)) {
+            prefs(context).edit().putString(KEY_ADDRESSES, current.joinToString(DELIMITER)).apply()
+        }
+    }
+
+    /** Removes any saved addresses matching [ip] or [ip]:port. */
+    fun removeIp(context: Context, ip: String) {
+        val trimmed = ip.trim()
+        val current = getAll(context).toMutableList()
+        val changed = current.removeAll { it == trimmed || it.startsWith("$trimmed:") }
+        if (changed) {
             prefs(context).edit().putString(KEY_ADDRESSES, current.joinToString(DELIMITER)).apply()
         }
     }

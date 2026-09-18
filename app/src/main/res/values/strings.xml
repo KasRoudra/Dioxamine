@@ -767,7 +767,7 @@
     <string name="remote_media_controls">Media Controls</string>
     <string name="remote_numeric_keypad">Numeric Keypad</string>
     <string name="touchpad_type">Type</string>
-    <string name="adb_ip_placeholder">192.168.1.100 or 192.168.1.100:5555</string>
+    <string name="adb_ip_placeholder">Enter IP</string>
     <string name="cd_choose_save_location">Choose save location</string>
     <string name="cd_attach_image">Attach image</string>
     <string name="touchpad_error_details">Details: %1$s</string>

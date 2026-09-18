@@ -253,7 +253,12 @@ fun DeviceConnectorCard(vm: AdbViewModel) {
                             }
                         },
                         label = { Text(stringResource(R.string.label_ip_address)) },
-                        placeholder = { Text(stringResource(R.string.adb_ip_placeholder)) },
+                        placeholder = {
+                            Text(
+                                stringResource(R.string.adb_ip_placeholder),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                            )
+                        },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         isError = !isIpValid,

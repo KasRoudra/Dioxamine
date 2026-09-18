@@ -762,7 +762,7 @@
     <string name="remote_media_controls">मीडिया नियंत्रण</string>
     <string name="remote_numeric_keypad">न्यूमेरिक कीपैड</string>
     <string name="touchpad_type">प्रकार</string>
-    <string name="adb_ip_placeholder">192.168.1.100 या 192.168.1.100:5555</string>
+    <string name="adb_ip_placeholder">IP दर्ज करें</string>
     <string name="cd_choose_save_location">सहेजने का स्थान चुनें</string>
     <string name="cd_attach_image">छवि संलग्न करें</string>
     <string name="touchpad_error_details">विवरण: %1$s</string>

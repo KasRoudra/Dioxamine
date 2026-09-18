@@ -2,11 +2,9 @@ package io.github.rhythmcache.dioxamine.adb.discovery
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -16,15 +14,22 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.window.PopupProperties
 import io.github.rhythmcache.dioxamine.R
 import io.github.rhythmcache.dioxamine.adb.AdbViewModel
+import io.github.rhythmcache.dioxamine.adb.SavedAdbAddresses
+import io.github.rhythmcache.dioxamine.adb.isValidIp
+import io.github.rhythmcache.dioxamine.adb.isValidPort
+import io.github.rhythmcache.dioxamine.adb.parseIpAndPort
 
 sealed class DiscoveryStep {
     object DeviceList : DiscoveryStep()
@@ -45,24 +50,10 @@ fun DiscoveryDialog(
     val context = LocalContext.current
     val discoveryVm = remember { AdbDiscoveryViewModel(context) }
     var step by remember { mutableStateOf<DiscoveryStep>(DiscoveryStep.DeviceList) }
-    val historyPrefs = remember { context.getSharedPreferences("device_address_history", android.content.Context.MODE_PRIVATE) }
-    var historyItems by remember {
-        val raw = historyPrefs.getString("saved_addresses", "") ?: ""
-        val list = if (raw.isNotBlank()) raw.split(";").filter { it.isNotBlank() } else emptyList()
-        mutableStateOf(list)
-    }
 
     DisposableEffect(Unit) {
         discoveryVm.startDiscovery()
         onDispose { discoveryVm.stopDiscovery() }
-    }
-
-    val saveAddressHistory = { address: String ->
-        val current = historyPrefs.getString("saved_addresses", "") ?: ""
-        val list = current.split(";").filter { it.isNotBlank() && it != address }.toMutableList()
-        list.add(0, address)
-        historyPrefs.edit().putString("saved_addresses", list.take(15).joinToString(";")).apply()
-        historyItems = list.take(15)
     }
 
     Dialog(
@@ -86,15 +77,12 @@ fun DiscoveryDialog(
             ) {
                 when (val s = step) {
                     is DiscoveryStep.DeviceList -> DeviceListStep(
-                        vm = vm,
                         discoveryVm = discoveryVm,
-                        historyItems = historyItems,
                         onDismiss = onDismiss,
                         onManualEntry = { step = DiscoveryStep.ManualChooseType },
                         onDeviceSelected = { device ->
                             when (device.type) {
                                 AdbServiceType.TCP -> {
-                                    saveAddressHistory("${device.host}:${device.port}")
                                     vm.connectTcpDirect(device.host, device.port)
                                     onDismiss()
                                 }
@@ -103,7 +91,6 @@ fun DiscoveryDialog(
                                     step = DiscoveryStep.ManualTlsConnect(device.host, device.port.toString(), serviceName = device.serviceName)
                                     vm.connectTls(device.host, device.port) { success, _ ->
                                         if (success) {
-                                            saveAddressHistory("tls:${device.host}:${device.port}")
                                             onDismiss()
                                         }
                                     }
@@ -123,7 +110,6 @@ fun DiscoveryDialog(
                         initial = s,
                         onBack = { step = DiscoveryStep.ManualChooseType },
                         onConnect = { ip, port ->
-                            saveAddressHistory("$ip:$port")
                             vm.connectTcpDirect(ip, port.toInt())
                             onDismiss()
                         }
@@ -141,12 +127,7 @@ fun DiscoveryDialog(
                         onGoToPair = { ip, port -> step = DiscoveryStep.ManualTlsPair(ip, port) },
                         onConnect = { ip, port, callback ->
                             vm.clearPairingError()
-                            vm.connectTls(ip, port.toInt()) { success, err ->
-                                if (success) {
-                                    saveAddressHistory("tls:$ip:$port")
-                                }
-                                callback?.invoke(success, err)
-                            }
+                            vm.connectTls(ip, port.toInt(), callback)
                         },
                         onDismissAfterConnected = onDismiss
                     )
@@ -177,9 +158,7 @@ fun DiscoverySheet(
 
 @Composable
 private fun DeviceListStep(
-    vm: AdbViewModel,
     discoveryVm: AdbDiscoveryViewModel,
-    historyItems: List<String>,
     onDismiss: () -> Unit,
     onManualEntry: () -> Unit,
     onDeviceSelected: (DiscoveredAdbDevice) -> Unit
@@ -205,50 +184,6 @@ private fun DeviceListStep(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-
-        // Wireless Address History for Fast Reconnection
-        if (historyItems.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "Recent Addresses",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(Modifier.height(4.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                for (item in historyItems) {
-                    val isTls = item.startsWith("tls:")
-                    val clean = if (isTls) item.removePrefix("tls:") else item
-                    val parts = clean.split(":")
-                    val host = parts.getOrNull(0) ?: ""
-                    val port = parts.getOrNull(1)?.toIntOrNull() ?: 5555
-                    AssistChip(
-                        onClick = {
-                            if (isTls) {
-                                vm.connectTls(host, port) { success, _ ->
-                                    if (success) onDismiss()
-                                }
-                            } else {
-                                vm.connectTcpDirect(host, port)
-                                onDismiss()
-                            }
-                        },
-                        label = {
-                            Text(if (isTls) "TLS $clean" else clean, style = MaterialTheme.typography.labelSmall)
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Filled.History, contentDescription = null, modifier = Modifier.size(14.dp))
-                        }
-                    )
-                }
-            }
-        }
 
         Spacer(Modifier.height(12.dp))
 
@@ -377,33 +312,142 @@ private fun ManualTcpStep(
     onBack: () -> Unit,
     onConnect: (String, String) -> Unit
 ) {
-    var ip by remember { mutableStateOf(initial.ip) }
-    var port by remember { mutableStateOf(initial.port) }
-    val isValid = ip.isNotBlank() && port.toIntOrNull() != null
+    val context = LocalContext.current
+    var savedAddresses by remember {
+        mutableStateOf(SavedAdbAddresses.getAll(context))
+    }
+
+    val mostRecent = remember { savedAddresses.firstOrNull() }
+    val defaultIp = remember {
+        if (initial.ip.isNotBlank()) initial.ip
+        else mostRecent?.substringBefore(":") ?: ""
+    }
+    val defaultPort = remember {
+        if (initial.port.isNotBlank() && initial.port != "5555") initial.port
+        else mostRecent?.substringAfter(":", "5555") ?: initial.port
+    }
+
+    var ip by remember { mutableStateOf(defaultIp) }
+    var port by remember { mutableStateOf(defaultPort) }
+    var suggestionsExpanded by remember { mutableStateOf(false) }
+    var ipFieldWidthPx by remember { mutableStateOf(0) }
+
+    val isIpValid = ip.isEmpty() || isValidIp(ip)
+    val isPortValid = port.isEmpty() || isValidPort(port)
+    val isFormValid = ip.isNotBlank() && isValidIp(ip) && isValidPort(port)
 
     Column(modifier = Modifier.fillMaxWidth()) {
         StepHeader(stringResource(R.string.discovery_connect_tcp), onBack)
         Spacer(Modifier.height(12.dp))
-        OutlinedTextField(
-            value = ip, onValueChange = { ip = it },
-            label = { Text(stringResource(R.string.label_ip_address)) }, singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth()
-        )
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = ip,
+                onValueChange = { input ->
+                    val (parsedIp, parsedPort) = parseIpAndPort(input)
+                    ip = parsedIp
+                    if (parsedPort != null) {
+                        port = parsedPort
+                    }
+                },
+                label = { Text(stringResource(R.string.label_ip_address)) },
+                placeholder = { Text(stringResource(R.string.adb_ip_placeholder)) },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                isError = !isIpValid,
+                supportingText = if (!isIpValid) {
+                    { Text(stringResource(R.string.err_invalid_ip_format), color = MaterialTheme.colorScheme.error) }
+                } else null,
+                trailingIcon = {
+                    if (savedAddresses.isNotEmpty()) {
+                        IconButton(onClick = { suggestionsExpanded = !suggestionsExpanded }) {
+                            Icon(
+                                imageVector = if (suggestionsExpanded) Icons.Filled.ArrowDropUp else Icons.Filled.ArrowDropDown,
+                                contentDescription = stringResource(R.string.cd_expand_collapse)
+                            )
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned { coordinates ->
+                        ipFieldWidthPx = coordinates.size.width
+                    }
+            )
+
+            DropdownMenu(
+                expanded = suggestionsExpanded && savedAddresses.isNotEmpty(),
+                onDismissRequest = { suggestionsExpanded = false },
+                properties = PopupProperties(focusable = false),
+                modifier = Modifier.width(with(LocalDensity.current) { ipFieldWidthPx.toDp() })
+            ) {
+                savedAddresses.forEach { address ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                address,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1
+                            )
+                        },
+                        onClick = {
+                            val (parsedIp, parsedPort) = parseIpAndPort(address)
+                            ip = parsedIp
+                            if (parsedPort != null) port = parsedPort
+                            suggestionsExpanded = false
+                        },
+                        trailingIcon = {
+                            IconButton(
+                                onClick = {
+                                    SavedAdbAddresses.remove(context, address)
+                                    savedAddresses = SavedAdbAddresses.getAll(context)
+                                    if (savedAddresses.isEmpty()) {
+                                        suggestionsExpanded = false
+                                    }
+                                },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = stringResource(R.string.cd_remove),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
-            value = port, onValueChange = { port = it.filter(Char::isDigit) },
-            label = { Text(stringResource(R.string.label_port)) }, singleLine = true,
+            value = port,
+            onValueChange = { input -> port = input.filter(Char::isDigit) },
+            label = { Text(stringResource(R.string.label_port)) },
+            placeholder = { Text("5555") },
+            singleLine = true,
             shape = RoundedCornerShape(12.dp),
+            isError = !isPortValid,
+            supportingText = if (!isPortValid) {
+                { Text(stringResource(R.string.err_invalid_port_range), color = MaterialTheme.colorScheme.error) }
+            } else null,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
         )
+
         Spacer(Modifier.height(16.dp))
         Button(
-            onClick = { onConnect(ip.trim(), port.trim()) },
-            enabled = isValid,
+            onClick = {
+                val finalIp = ip.trim()
+                val finalPort = port.trim().ifEmpty { "5555" }
+                SavedAdbAddresses.add(context, "$finalIp:$finalPort")
+                onConnect(finalIp, finalPort)
+            },
+            enabled = isFormValid,
             modifier = Modifier.fillMaxWidth()
-        ) { Text(stringResource(R.string.btn_connect)) }
+        ) {
+            Text(stringResource(R.string.btn_connect))
+        }
     }
 }
 

@@ -36,28 +36,6 @@ import io.github.rhythmcache.dioxamine.plugin.PluginRunnerScreen
 import io.github.rhythmcache.dioxamine.plugin.PluginSafBridge
 import io.github.rhythmcache.dioxamine.plugin.PluginsTab
 
-private fun parseIpAndPort(input: String): Pair<String, String?> {
-    val trimmed = input.trim()
-    if (trimmed.contains(":")) {
-        val parts = trimmed.split(":")
-        if (parts.size == 2) {
-            return Pair(parts[0].trim(), parts[1].trim())
-        }
-    }
-    return Pair(trimmed, null)
-}
-
-private fun isValidIp(ip: String): Boolean {
-    if (ip.equals("localhost", ignoreCase = true)) return true
-    val ipv4Regex = Regex("^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$")
-    return ipv4Regex.matches(ip)
-}
-
-private fun isValidPort(portStr: String): Boolean {
-    val p = portStr.toIntOrNull() ?: return false
-    return p in 1..65535
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdbScreen(
